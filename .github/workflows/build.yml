@@ -1,0 +1,47 @@
+name: Build ARMSX2 Sion
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ambil ARMSX2 (commit 9fed787)
+        run: |
+          git init upstream
+          git -C upstream remote add origin https://github.com/ARMSX2/armsx2
+          git -C upstream fetch --depth 1 origin 9fed787901e5eee9e5d15f17666fd4fc902e1099
+          git -C upstream checkout FETCH_HEAD
+
+      - name: Terapkan patch Sion
+        run: git -C upstream apply "$GITHUB_WORKSPACE/armsx2-styles.patch"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Pasang NDK dan CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "ndk;29.0.14206865" "cmake;3.31.6"
+
+      - name: Build APK
+        working-directory: upstream/platforms/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug -Parmsx2.applicationId=com.sion.armsx2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ARMSX2-Sion-APK
+          path: upstream/platforms/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
