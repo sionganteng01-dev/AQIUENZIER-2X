@@ -1,0 +1,519 @@
+diff --git a/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeScreen.kt b/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeScreen.kt
+index f438e95..56df740 100644
+--- a/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeScreen.kt
++++ b/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeScreen.kt
+@@ -284,7 +284,9 @@ fun HomeScreen(
+             // is up: the wave, Flurry or a GIF would otherwise redraw behind it every frame.
+             if (!LibraryScreensaver.showing.value) {
+                 val libraryBg = LibraryBackground.uri.value
+-                if (libraryBg == null) {
++                if (state.layout.isNew) {
++                    MonoBackground(Modifier.fillMaxSize())
++                } else if (libraryBg == null) {
+                     // Default: the live PS3-XMB wave (XmbGlView, a GLES3 port of linkev's
+                     // grid-displacement mesh, matching iOS). When GL can't init (older Mali without
+                     // float-texture filtering, or any EGL failure), fall back to LibraryWaveBackground,
+@@ -368,8 +370,10 @@ fun HomeScreen(
+             // 1.0 everywhere until the user moves the Cover size slider.
+             val coverScale = com.armsx2.ui.UiScale.coverScale.value
+             val gridCellDp = (if (compact) 104f else 118f) * coverScale
+-            val columns = if (state.layout == LibraryLayout.Grid) {
++            val columns = if (state.layout == LibraryLayout.Grid || state.layout == LibraryLayout.Glass) {
+                 GridCells.Adaptive(gridCellDp.dp)
++            } else if (state.layout == LibraryLayout.Wall) {
++                GridCells.Adaptive((gridCellDp * 0.72f).dp)
+             } else {
+                 // List and Shelf are full-width rows.
+                 GridCells.Fixed(1)
+@@ -386,6 +390,11 @@ fun HomeScreen(
+                 LibraryLayout.Shelf ->
+                     (maxWidth.value / (((if (compact) 84f else 100f) * coverScale) + 20f)).toInt().coerceIn(3, 8)
+                 LibraryLayout.List -> 1
++                LibraryLayout.Glass ->
++                    (maxWidth.value / (gridCellDp)).toInt().coerceAtLeast(1)
++                LibraryLayout.Wall ->
++                    (maxWidth.value / (gridCellDp * 0.72f)).toInt().coerceAtLeast(1)
++                LibraryLayout.Carousel, LibraryLayout.Ps4 -> 1
+             }
+             LaunchedEffect(estimatedColumns) { HomeInputController.setColumnCount(estimatedColumns) }
+ 
+@@ -430,6 +439,7 @@ fun HomeScreen(
+             val gridSelected = if (com.armsx2.ui.common.PadInput.active.value) state.selectedIndex else -1
+             LaunchedEffect(state.selectedIndex, state.visibleGames.size, state.layout, HomeInputController.zone.value) {
+                 if (HomeInputController.zone.value != HomeZone.Grid) return@LaunchedEffect
++                if (state.layout.isFullSpan) return@LaunchedEffect
+                 // Don't follow (and thus don't scroll away from the top) until the user
+                 // has actually navigated — otherwise a cold open snaps the grid to the
+                 // initially-selected cover and hides the toolbar/search/recents header.
+@@ -533,6 +543,10 @@ fun HomeScreen(
+                                 LibraryLayout.Grid -> "☷"
+                                 LibraryLayout.List -> "▦"
+                                 LibraryLayout.Shelf -> "▤"
++                                LibraryLayout.Glass -> "◫"
++                                LibraryLayout.Wall -> "▩"
++                                LibraryLayout.Carousel -> "⟷"
++                                LibraryLayout.Ps4 -> "◈"
+                             },
+                             str("games.toolbar.rows"),
+                             viewModel::toggleLayout,
+@@ -821,7 +835,7 @@ fun HomeScreen(
+                 //
+                 // Hidden while SEARCHING, exactly like Recently Played above — a search should
+                 // show matches, not matches re-sorted into shelves.
+-                if (state.layout != LibraryLayout.List && state.query.isBlank() && state.initialized) {
++                if (state.layout != LibraryLayout.List && !state.layout.isNew && state.query.isBlank() && state.initialized) {
+                     val categoryNames = com.armsx2.GameCategories.names()
+                     categoryNames.forEach { categoryName ->
+                         val members = com.armsx2.GameCategories.members(categoryName)
+@@ -921,6 +935,26 @@ fun HomeScreen(
+                         }
+                         emptyLibrary(reason)
+                     }
++                } else if (state.layout.isFullSpan) {
++                    item(span = { GridItemSpan(maxLineSpan) }, key = "styled-${state.layout.name}") {
++                        if (state.layout == LibraryLayout.Carousel) {
++                            CarouselLayout(
++                                games = state.visibleGames,
++                                selectedIndex = state.selectedIndex,
++                                onSelect = { viewModel.setSelection(it) },
++                                onLaunch = { viewModel.launch(it) },
++                                onDetails = { menuGame = it },
++                            )
++                        } else {
++                            Ps4Layout(
++                                games = state.visibleGames,
++                                selectedIndex = state.selectedIndex,
++                                onSelect = { viewModel.setSelection(it) },
++                                onLaunch = { viewModel.launch(it) },
++                                onDetails = { menuGame = it },
++                            )
++                        }
++                    }
+                 } else if (state.layout == LibraryLayout.Shelf) {
+                     // Fill each plank: chunk by how many covers fit the shelf width.
+                     val shelfCoverW = ((if (compact) 84f else 100f) * coverScale).dp
+@@ -963,7 +997,23 @@ fun HomeScreen(
+                         key = { _, game -> game.uri.toString() },
+                         contentType = { _, _ -> state.layout.name },
+                     ) { index, game ->
+-                        if (state.layout == LibraryLayout.Grid) {
++                        if (state.layout == LibraryLayout.Glass) {
++                            GlassGridCard(
++                                game = game,
++                                selected = index == gridSelected,
++                                onSelect = { viewModel.setSelection(index) },
++                                onLaunch = { viewModel.launch(game) },
++                                onDetails = { menuGame = game },
++                            )
++                        } else if (state.layout == LibraryLayout.Wall) {
++                            PosterCard(
++                                game = game,
++                                selected = index == gridSelected,
++                                onSelect = { viewModel.setSelection(index) },
++                                onLaunch = { viewModel.launch(game) },
++                                onDetails = { menuGame = game },
++                            )
++                        } else if (state.layout == LibraryLayout.Grid) {
+                             GameGridCard(
+                                 game = game,
+                                 selected = index == gridSelected,
+@@ -2206,7 +2256,7 @@ private fun showsMemcardCover(game: GameInfo): Boolean {
+ }
+ 
+ @Composable
+-private fun GameCover(
++internal fun GameCover(
+     game: GameInfo,
+     modifier: Modifier = Modifier,
+     cornerRadius: Dp = 12.dp,
+diff --git a/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeViewModel.kt b/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeViewModel.kt
+index 4f1f70c..374df1c 100644
+--- a/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeViewModel.kt
++++ b/platforms/android/app/src/main/java/com/armsx2/ui/home/HomeViewModel.kt
+@@ -15,7 +15,8 @@ import androidx.core.content.edit
+ 
+ enum class HomeSort { Title, RecentlyPlayed, Compatibility }
+ 
+-enum class LibraryLayout { Grid, List, Shelf }
++/** Urutan ini adalah urutan putaran tombol tata letak di toolbar. */
++enum class LibraryLayout { Grid, List, Shelf, Glass, Wall, Carousel, Ps4 }
+ 
+ data class HomeUiState(
+     val allGames: List<GameInfo> = emptyList(),
+diff --git a/platforms/android/app/src/main/java/com/armsx2/ui/home/LibraryStyles.kt b/platforms/android/app/src/main/java/com/armsx2/ui/home/LibraryStyles.kt
+new file mode 100644
+index 0000000..90261e2
+--- /dev/null
++++ b/platforms/android/app/src/main/java/com/armsx2/ui/home/LibraryStyles.kt
+@@ -0,0 +1,371 @@
++package com.armsx2.ui.home
++
++import androidx.compose.animation.Crossfade
++import androidx.compose.animation.core.LinearEasing
++import androidx.compose.animation.core.RepeatMode
++import androidx.compose.animation.core.animateFloat
++import androidx.compose.animation.core.animateFloatAsState
++import androidx.compose.animation.core.infiniteRepeatable
++import androidx.compose.animation.core.rememberInfiniteTransition
++import androidx.compose.animation.core.tween
++import androidx.compose.foundation.Canvas
++import androidx.compose.foundation.ExperimentalFoundationApi
++import androidx.compose.foundation.background
++import androidx.compose.foundation.border
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.combinedClickable
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.BoxWithConstraints
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.PaddingValues
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.aspectRatio
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.lazy.LazyRow
++import androidx.compose.foundation.lazy.itemsIndexed
++import androidx.compose.foundation.lazy.rememberLazyListState
++import androidx.compose.foundation.pager.HorizontalPager
++import androidx.compose.foundation.pager.PageSize
++import androidx.compose.foundation.pager.rememberPagerState
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.graphics.Brush
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.graphicsLayer
++import androidx.compose.ui.layout.ContentScale
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.style.TextAlign
++import androidx.compose.ui.text.style.TextOverflow
++import androidx.compose.ui.unit.Dp
++import androidx.compose.ui.unit.dp
++import com.armsx2.EnglishTitles
++import com.armsx2.GameInfo
++import kotlinx.coroutines.launch
++import kotlin.math.PI
++import kotlin.math.abs
++import kotlin.math.cos
++import kotlin.math.sin
++
++/** Layout yang berdiri sendiri: Carousel dan Ps4 mengisi satu baris penuh; Glass dan Wall memakai kisi. */
++val LibraryLayout.isFullSpan: Boolean
++    get() = this == LibraryLayout.Carousel || this == LibraryLayout.Ps4
++
++/** Semua layout baru memakai latar hitam-putih beranimasi dan gaya kaca. */
++val LibraryLayout.isNew: Boolean
++    get() = this == LibraryLayout.Glass || this == LibraryLayout.Wall ||
++        this == LibraryLayout.Carousel || this == LibraryLayout.Ps4
++
++/** Latar hitam-putih: tiga gumpalan cahaya bergerak pelan, sapuan cahaya, dan vignette. */
++@Composable
++fun MonoBackground(modifier: Modifier = Modifier) {
++    val t by rememberInfiniteTransition(label = "mono").animateFloat(
++        initialValue = 0f,
++        targetValue = 1f,
++        animationSpec = infiniteRepeatable(tween(30000, easing = LinearEasing), RepeatMode.Restart),
++        label = "mono-t",
++    )
++    Canvas(modifier.fillMaxSize()) {
++        val w = size.width
++        val h = size.height
++        val ph = t * 2f * PI.toFloat()
++        drawRect(Color.Black)
++        fun blob(cx: Float, cy: Float, r: Float, a: Float) {
++            val c = Offset(cx * w, cy * h)
++            drawCircle(
++                brush = Brush.radialGradient(listOf(Color.White.copy(alpha = a), Color.Transparent), center = c, radius = r * w),
++                radius = r * w,
++                center = c,
++            )
++        }
++        blob(0.22f + 0.08f * sin(ph), 0.28f + 0.06f * cos(ph), 0.55f, 0.16f)
++        blob(0.80f + 0.07f * cos(ph * 0.8f), 0.62f + 0.08f * sin(ph * 0.6f), 0.60f, 0.10f)
++        blob(0.45f + 0.12f * sin(ph * 0.5f + 2f), 0.95f - 0.05f * cos(ph), 0.45f, 0.07f)
++        val sx = (t * 1.4f - 0.2f) * w
++        drawRect(
++            brush = Brush.horizontalGradient(
++                listOf(Color.Transparent, Color.White.copy(alpha = 0.05f), Color.Transparent),
++                startX = sx - w * 0.2f,
++                endX = sx + w * 0.2f,
++            ),
++        )
++        drawRect(
++            brush = Brush.radialGradient(
++                listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)),
++                center = Offset(w / 2f, h / 2f),
++                radius = maxOf(w, h) * 0.75f,
++            ),
++        )
++    }
++}
++
++/** Kaca: isi putih transparan, garis tepi berkilau. Dipakai untuk kartu dan tombol. */
++fun Modifier.glass(radius: Dp = 20.dp, selected: Boolean = false): Modifier {
++    val shape = RoundedCornerShape(radius)
++    return this
++        .clip(shape)
++        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.03f))))
++        .border(
++            1.dp,
++            Brush.verticalGradient(
++                listOf(Color.White.copy(alpha = if (selected) 0.85f else 0.34f), Color.White.copy(alpha = 0.05f)),
++            ),
++            shape,
++        )
++}
++
++/** Tombol kaca berbentuk kapsul. [primary] memakai isi putih terang. */
++@OptIn(ExperimentalFoundationApi::class)
++@Composable
++fun GlassButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = false) {
++    val shape = RoundedCornerShape(50)
++    Box(
++        modifier
++            .clip(shape)
++            .background(
++                if (primary) {
++                    Brush.horizontalGradient(listOf(Color.White.copy(alpha = 0.95f), Color.White.copy(alpha = 0.7f)))
++                } else {
++                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.2f), Color.White.copy(alpha = 0.05f)))
++                },
++            )
++            .border(1.dp, Color.White.copy(alpha = if (primary) 0f else 0.4f), shape)
++            .clickable(onClick = onClick)
++            .padding(horizontal = 22.dp, vertical = 12.dp),
++        contentAlignment = Alignment.Center,
++    ) {
++        Text(
++            label,
++            color = if (primary) Color.Black else Color.White,
++            fontWeight = FontWeight.SemiBold,
++            style = MaterialTheme.typography.labelLarge,
++        )
++    }
++}
++
++/** Geser (cover flow): kartu di tengah membesar, sisi lain mengecil dan memudar. */
++@OptIn(ExperimentalFoundationApi::class)
++@Composable
++fun CarouselLayout(
++    games: List<GameInfo>,
++    selectedIndex: Int,
++    onSelect: (Int) -> Unit,
++    onLaunch: (GameInfo) -> Unit,
++    onDetails: (GameInfo) -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    if (games.isEmpty()) return
++    val sel = selectedIndex.coerceIn(0, games.lastIndex)
++    val scope = rememberCoroutineScope()
++    val pagerState = rememberPagerState(initialPage = sel, pageCount = { games.size })
++    LaunchedEffect(sel, games.size) {
++        if (pagerState.currentPage != sel) pagerState.animateScrollToPage(sel)
++    }
++    LaunchedEffect(pagerState.settledPage) {
++        if (pagerState.settledPage != sel) onSelect(pagerState.settledPage)
++    }
++    val game = games[pagerState.currentPage.coerceIn(0, games.lastIndex)]
++    Column(modifier.fillMaxWidth()) {
++        BoxWithConstraints(Modifier.fillMaxWidth()) {
++            val cardW = minOf(maxWidth * 0.52f, 260.dp)
++            val cardH = cardW * 1.45f
++            HorizontalPager(
++                state = pagerState,
++                modifier = Modifier.fillMaxWidth().height(cardH + 28.dp),
++                contentPadding = PaddingValues(horizontal = (maxWidth - cardW) / 2),
++                pageSize = PageSize.Fixed(cardW),
++                pageSpacing = 12.dp,
++                beyondViewportPageCount = 2,
++            ) { page ->
++                val g = games[page]
++                Box(
++                    Modifier
++                        .fillMaxSize()
++                        .graphicsLayer {
++                            val d = pagerState.getOffsetDistanceInPages(page).coerceIn(-1f, 1f)
++                            val focus = 1f - abs(d)
++                            val s = 0.8f + 0.2f * focus
++                            scaleX = s
++                            scaleY = s
++                            alpha = 0.4f + 0.6f * focus
++                            rotationY = -d * 14f
++                            cameraDistance = 12f * density
++                        }
++                        .combinedClickable(
++                            onClick = {
++                                if (page == pagerState.currentPage) onLaunch(g)
++                                else scope.launch { pagerState.animateScrollToPage(page) }
++                            },
++                            onLongClick = { onDetails(g) },
++                        ),
++                    contentAlignment = Alignment.Center,
++                ) {
++                    Box(Modifier.fillMaxWidth().glass(24.dp, selected = page == pagerState.currentPage).padding(10.dp)) {
++                        GameCover(
++                            g,
++                            Modifier.fillMaxWidth().aspectRatio(0.72f),
++                            cornerRadius = 18.dp,
++                            contentScale = ContentScale.Fit,
++                        )
++                    }
++                }
++            }
++        }
++        Spacer(Modifier.height(6.dp))
++        Text(
++            game.displayTitle(EnglishTitles.enabled.value),
++            style = MaterialTheme.typography.titleMedium,
++            fontWeight = FontWeight.SemiBold,
++            color = Color.White,
++            maxLines = 1,
++            overflow = TextOverflow.Ellipsis,
++            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
++            textAlign = TextAlign.Center,
++        )
++        Spacer(Modifier.height(12.dp))
++        Row(
++            Modifier.fillMaxWidth().padding(horizontal = 24.dp),
++            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
++        ) {
++            GlassButton("Main", { onLaunch(game) }, primary = true)
++            GlassButton("Detail", { onDetails(game) })
++        }
++    }
++}
++
++/** PS4: latar besar dari game yang dipilih, lalu baris ubin kaca di bawahnya. */
++@OptIn(ExperimentalFoundationApi::class)
++@Composable
++fun Ps4Layout(
++    games: List<GameInfo>,
++    selectedIndex: Int,
++    onSelect: (Int) -> Unit,
++    onLaunch: (GameInfo) -> Unit,
++    onDetails: (GameInfo) -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    if (games.isEmpty()) return
++    val sel = selectedIndex.coerceIn(0, games.lastIndex)
++    val game = games[sel]
++    val listState = rememberLazyListState()
++    LaunchedEffect(sel) { listState.animateScrollToItem(sel) }
++    Column(modifier.fillMaxWidth()) {
++        Box(Modifier.fillMaxWidth().height(320.dp)) {
++            Crossfade(targetState = sel, animationSpec = tween(450), label = "ps4-hero") { idx ->
++                GameCover(
++                    games[idx],
++                    Modifier.fillMaxSize().graphicsLayer { alpha = 0.55f },
++                    cornerRadius = 0.dp,
++                    contentScale = ContentScale.Crop,
++                    placeholderText = false,
++                )
++            }
++            Box(
++                Modifier.fillMaxSize().background(
++                    Brush.verticalGradient(
++                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f), Color.Black),
++                    ),
++                ),
++            )
++            Column(Modifier.align(Alignment.BottomStart).padding(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
++                Text(
++                    game.displayTitle(EnglishTitles.enabled.value),
++                    style = MaterialTheme.typography.headlineSmall,
++                    fontWeight = FontWeight.Bold,
++                    color = Color.White,
++                    maxLines = 2,
++                    overflow = TextOverflow.Ellipsis,
++                )
++                Text(
++                    "Game ${sel + 1} dari ${games.size}",
++                    style = MaterialTheme.typography.bodySmall,
++                    color = Color.White.copy(alpha = 0.7f),
++                )
++                Spacer(Modifier.height(12.dp))
++                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
++                    GlassButton("Main", { onLaunch(game) }, primary = true)
++                    GlassButton("Detail", { onDetails(game) })
++                }
++            }
++        }
++        LazyRow(
++            state = listState,
++            contentPadding = PaddingValues(horizontal = 14.dp),
++            horizontalArrangement = Arrangement.spacedBy(12.dp),
++            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp),
++        ) {
++            itemsIndexed(games, key = { _, g -> g.uri.toString() }) { i, g ->
++                val focused = i == sel
++                val s by animateFloatAsState(if (focused) 1f else 0.86f, label = "ps4-tile")
++                Box(
++                    Modifier
++                        .width(118.dp)
++                        .graphicsLayer { scaleX = s; scaleY = s }
++                        .combinedClickable(
++                            onClick = { if (focused) onLaunch(g) else onSelect(i) },
++                            onLongClick = { onDetails(g) },
++                        )
++                        .glass(16.dp, selected = focused)
++                        .padding(6.dp),
++                ) {
++                    GameCover(g, Modifier.fillMaxWidth().aspectRatio(0.72f), cornerRadius = 12.dp)
++                }
++            }
++        }
++    }
++}
++
++/** Kisi kaca: kartu dengan bingkai kaca dan judul. */
++@OptIn(ExperimentalFoundationApi::class)
++@Composable
++fun GlassGridCard(game: GameInfo, selected: Boolean, onSelect: () -> Unit, onLaunch: () -> Unit, onDetails: () -> Unit) {
++    Column(
++        Modifier
++            .fillMaxWidth()
++            .glass(18.dp, selected = selected)
++            .combinedClickable(onClick = { onSelect(); onLaunch() }, onLongClick = onDetails)
++            .padding(8.dp),
++    ) {
++        GameCover(game, Modifier.fillMaxWidth().aspectRatio(0.72f), cornerRadius = 12.dp)
++        Spacer(Modifier.height(6.dp))
++        Text(
++            game.displayTitle(EnglishTitles.enabled.value),
++            style = MaterialTheme.typography.labelMedium,
++            color = Color.White.copy(alpha = if (selected) 1f else 0.8f),
++            maxLines = 1,
++            overflow = TextOverflow.Ellipsis,
++            modifier = Modifier.padding(horizontal = 2.dp),
++        )
++    }
++}
++
++/** Dinding poster: hanya sampul, rapat, tanpa teks. */
++@OptIn(ExperimentalFoundationApi::class)
++@Composable
++fun PosterCard(game: GameInfo, selected: Boolean, onSelect: () -> Unit, onLaunch: () -> Unit, onDetails: () -> Unit) {
++    Box(
++        Modifier
++            .fillMaxWidth()
++            .aspectRatio(0.72f)
++            .combinedClickable(onClick = { onSelect(); onLaunch() }, onLongClick = onDetails),
++    ) {
++        GameCover(game, Modifier.fillMaxSize(), cornerRadius = 6.dp)
++        if (selected) {
++            Box(Modifier.fillMaxSize().border(2.dp, Color.White, RoundedCornerShape(6.dp)))
++        }
++    }
++}
